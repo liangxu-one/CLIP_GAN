@@ -1,0 +1,30 @@
+Brotli @ file:///tmp/abs_ecyw11_7ze/croots/recipe/brotli-split_1659616059936/work
+certifi @ file:///croot/certifi_1700501669400/work/certifi
+cffi @ file:///croot/cffi_1700254295673/work
+charset-normalizer @ file:///tmp/build/80754af9/charset-normalizer_1630003229654/work
+cryptography @ file:///croot/cryptography_1702070282333/work
+filelock==3.13.1
+fsspec==2023.12.2
+huggingface-hub==0.20.1
+idna @ file:///croot/idna_1666125576474/work
+mkl-fft @ file:///croot/mkl_fft_1695058164594/work
+mkl-random @ file:///croot/mkl_random_1695059800811/work
+mkl-service==2.4.0
+numpy @ file:///work/mkl/numpy_and_numpy_base_1682953417311/work
+packaging==23.2
+Pillow @ file:///croot/pillow_1696580024257/work
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pyOpenSSL @ file:///croot/pyopenssl_1690223430423/work
+PySocks @ file:///tmp/build/80754af9/pysocks_1605305779399/work
+PyYAML==6.0.1
+regex==2023.12.25
+requests @ file:///croot/requests_1690400202158/work
+safetensors==0.4.1
+tokenizers==0.15.0
+torch==1.11.0
+torchaudio==0.11.0
+torchvision==0.12.0
+tqdm==4.66.1
+transformers==4.36.2
+typing_extensions @ file:///croot/typing_extensions_1690297465030/work
+urllib3 @ file:///croot/urllib3_1698257533958/work
