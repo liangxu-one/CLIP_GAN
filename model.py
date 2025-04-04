@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModel, CLIPModel
-from module.utils import Embeddings, _get_clones
+from transformers import AutoModel, CLIPModel, GPT2LMHeadModel
 
 class CaptionModel(nn.Module):
     def __init__(self, config) -> None:
@@ -29,17 +28,19 @@ class CaptionModel(nn.Module):
 
         if self.vision_model == 'swin':
             self.image_encoder = AutoModel.from_pretrained(config.vision_path)
+            self.mlp = nn.Linear(self.image_encoder.num_features, self.hidden_dim)
         else:
             clip_model = CLIPModel.from_pretrained(config.vision_path)
             self.image_encoder = clip_model.vision_model
+            self.mlp = nn.Linear(clip_model.vision_embed_dim, self.hidden_dim)
 
-        self.caption_encoder = Embeddings(config)
+        self.img_to_text = nn.Parameter(torch.randn((config.gpt_prefix_length, self.hidden_dim)))
+        map_layer = nn.TransformerDecoderLayer(d_model = config.hidden_dim, nhead = config.head_nums, 
+                                            dropout = config.dropout, activation = F.relu, batch_first = True)
+        self.map = nn.TransformerDecoder(map_layer, config.map_layer_nums)
 
-        decoder_layer = nn.TransformerDecoderLayer(d_model = config.hidden_dim, nhead = config.head_nums, 
-                                                dropout = config.dropout, activation = F.relu, batch_first = True)
-        self.decoder = _get_clones(decoder_layer, config.decoder_layer_nums)
-
-        self.classify = nn.Linear(config.hidden_dim, config.vocab_size)
+        self.decoder_model = GPT2LMHeadModel.from_pretrained(config.text_path)
+        self.decoder_model.resize_token_embeddings(len(config.tokenizer))
 
         if self.text_model == 'bert':
             self.loss_fun = nn.CrossEntropyLoss(reduction = 'none', ignore_index = config.pad_token_id)
@@ -53,6 +54,9 @@ class CaptionModel(nn.Module):
                 img_embedding = self.image_encoder(img)[0]
             else:
                 img_embedding = self.image_encoder(img)[0][:, 1:, ]
+            img_embedding = self.mlp(img_embedding)
+            img_to_text_feat = self.img_to_text.unsqueeze(0).repeat(img_embedding.size(0), 1, 1)
+            img_embedding = self.map(tgt = img_to_text_feat, memory = img_embedding)
         else:
             img_embedding = img_embed
 
@@ -69,13 +73,11 @@ class CaptionModel(nn.Module):
         caption_mask = caption_mask.unsqueeze(1).repeat(1, self.head_nums, 1, 1).reshape(-1, caption_mask.size(-1), caption_mask.size(-1))
         padding_mask = ((caption_index != self.pad_token_id) & (caption_index != self.eos_token_id)).to(torch.float32)
 
-        caption_embedding = self.caption_encoder(caption_index)
-
-        out = caption_embedding
-        for i in range(self.decoder_layer_nums):
-            out = self.decoder[i](tgt = out, memory = img_embedding, tgt_mask = caption_mask, tgt_key_padding_mask = ~(padding_mask > 0))
-
-        pred = self.classify(out)
+        caption_embedding = self.decoder_model.get_input_embeddings()(caption_index)
+        fuse_embedding = torch.cat([img_embedding, caption_embedding], dim = 1)
+        fuse_mask = torch.cat([torch.ones((img_embedding.size(0), img_embedding.size(1)), device = padding_mask.device), padding_mask], dim = 1)
+        out = self.decoder_model(inputs_embeds = fuse_embedding, attention_mask = (fuse_mask > 0))[0]
+        pred = torch.split(out, [img_embedding.size(1), caption_embedding.size(1)], dim = 1)[1]
 
         if label is None:
             return pred

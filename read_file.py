@@ -154,9 +154,9 @@ class ImageCaption(Dataset):
 
             for caption_sentence in sentences:
                 caption_encoded = self.tokenizer.encode_plus(
-                caption_sentence, max_length=self.max_length, padding=False, return_attention_mask=False, return_token_type_ids=False, truncation=True)
+                caption_sentence, max_length=self.max_length - 1, padding=False, return_attention_mask=False, return_token_type_ids=False, truncation=True)
 
-                caption_token_id = caption_encoded['input_ids'][1:-1]
+                caption_token_id = caption_encoded['input_ids']
                 caption = [self.bos_token_id] + caption_token_id + [self.pad_token_id] * (self.max_length - 1 - len(caption_token_id))
                 label = caption_token_id + [self.eos_token_id] + [self.pad_token_id] * (self.max_length  - 1 - len(caption_token_id))
 

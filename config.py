@@ -19,6 +19,7 @@ class Config():
         self.rl_lr = 1e-5
         self.weight_decay = 1e-4
         self.epoch = 30 if stage == 'supervised' else 20
+        self.gan_epoch = 4
 
         self.decode_method = 'greedy'
         self.beam_size = 5
@@ -29,14 +30,17 @@ class Config():
                                'PreTrainedModel/swin-tiny-patch4-window7-224',
                                'PreTrainedModel/swin-base-patch4-window7-224-in22k',
                                'PreTrainedModel/swin-large-patch4-window12-384-in22k',
-                               'PreTrainedModel/clip-vit-base-patch32']
+                               'PreTrainedModel/clip-vit-base-patch32',
+                               'PreTrainedModel/gpt2']
 
-        self.text_model = 'clip'
-        self.text_path = os.path.join(path, self.PreTrainedPath[5])
+        self.text_model = 'gpt2'
+        self.text_path = os.path.join(path, self.PreTrainedPath[6])
         self.tokenizer = AutoTokenizer.from_pretrained(self.text_path, do_lower_case = True)
+        special_tokens_dict = {"bos_token": "<|beginoftext|>", 'pad_token': "<pad>"}
+        self.tokenizer.add_special_tokens(special_tokens_dict)
 
-        self.vision_model = 'swin'
-        self.vision_path = os.path.join(path, self.PreTrainedPath[2])
+        self.vision_model = 'clip'
+        self.vision_path = os.path.join(path, self.PreTrainedPath[5])
         if self.vision_model == 'swin':
             self.image_process = ViTImageProcessor.from_pretrained(self.vision_path)
         else:
@@ -45,7 +49,7 @@ class Config():
         self.image_mean = self.image_process.image_mean
         self.image_std = self.image_process.image_std
 
-        self.vocab_size = self.tokenizer.vocab_size
+        self.vocab_size = len(self.tokenizer)
 
         if self.text_model == 'bert':
             self.pad_token_id = self.tokenizer.pad_token_id
@@ -59,7 +63,7 @@ class Config():
             self.eos_token_id = self.tokenizer.eos_token_id
             self.mask_token_id = self.tokenizer.mask_token_id
 
-        self.batch_size = 24
+        self.batch_size = 32
         self.img_length = 7
         self.max_length = 25
         self.generation_length = self.max_length - 1
@@ -68,6 +72,8 @@ class Config():
         self.encoder_layer_nums = 2
         self.decoder_layer_nums = 1 if self.vision_model ==  'swin' else 4
         self.hidden_dim = 768
+        self.gpt_prefix_length = 20
+        self.map_layer_nums = 2
 
         self.sentence_nums = 5
 
@@ -82,7 +88,7 @@ class Config():
         self.stage = stage
 
         self.model_save_path = os.path.join(path, 'model_save/train_{}'.format(self.dataset))
-        self.ck = 'baseline_tiny_clip_text.pt'
+        self.ck = 'baseline_clip_gpt_text.pt'
 
         # 判别器
         self.discriminator_hidden_dim = 512

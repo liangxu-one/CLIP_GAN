@@ -2,6 +2,7 @@ import torch, copy, math
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
+from transformers import CLIPModel, AutoTokenizer
 from typing import Optional, Any, Union, Callable
 from torch import Tensor
 
@@ -108,22 +109,24 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
 
         self.head_nums = config.head_nums
-        self.pad_token_id = config.pad_token_id
-        self.bos_token_id = config.bos_token_id
-        self.eos_token_id = config.eos_token_id
-        self.mask_token_id = config.mask_token_id
+        self.tokenizer = config.tokenizer
+        self.clip_tokenizer = AutoTokenizer.from_pretrained(config.clip_path)
+        self.pad_token_id = self.clip_tokenizer.pad_token_id
+        self.bos_token_id = self.clip_tokenizer.bos_token_id
+        self.eos_token_id = self.clip_tokenizer.eos_token_id
+        self.mask_token_id = self.clip_tokenizer.mask_token_id
 
         self.img_length = config.img_length
+        self.max_length = config.max_length
 
         self.img_mean = torch.tensor(config.image_mean)
         self.img_std = torch.tensor(config.image_std)
 
-        temp_config = copy.deepcopy(config)
-        temp_config.hidden_dim = config.generator_hidden_dim
-        self.embeddings = Embeddings(temp_config)
-        encoder_layer = nn.TransformerEncoderLayer(d_model = config.generator_hidden_dim, nhead = config.head_nums, 
-                                                dropout = config.dropout, activation = F.relu, batch_first = True)
-        self.encoder = nn.TransformerEncoder(encoder_layer, config.generator_encoder_layer_nums)
+        clip_model = CLIPModel.from_pretrained(config.clip_path)
+        self.text_encoder = clip_model.text_model
+        for p in self.text_encoder.parameters():
+            p.requires_grad = False
+        self.mlp = nn.Linear(clip_model.text_embed_dim, config.generator_hidden_dim)
 
         self.map = nn.Sequential(nn.Linear(2 * config.generator_hidden_dim, config.generator_hidden_dim),
                                  nn.LayerNorm(config.generator_hidden_dim))
@@ -141,10 +144,13 @@ class Generator(nn.Module):
 
     def forward(self, caption_index):
 
-        caption_embedding = self.embeddings(caption_index)
-        padding_mask = ((caption_index != self.pad_token_id) & (caption_index != self.eos_token_id)).to(torch.float32)
-        caption_embedding = self.encoder(caption_embedding, src_key_padding_mask = ~(padding_mask > 0))
+        caption_str = self.tokenizer.batch_decode(caption_index.tolist(), skip_special_tokens = True)
+        clip_caption_index = self.clip_tokenizer.batch_encode_plus(caption_str, max_length = self.max_length, padding = 'max_length', truncation = True)
+        clip_caption_index = torch.tensor(clip_caption_index['input_ids'], device = caption_index.device)
 
+        padding_mask = ((clip_caption_index != self.pad_token_id) & (clip_caption_index != self.eos_token_id)).to(torch.float32)
+        caption_embedding = self.text_encoder(clip_caption_index, attention_mask = (padding_mask > 0))[0]
+        caption_embedding = self.mlp(caption_embedding)
         global_caption_embedding = torch.sum(caption_embedding * padding_mask.unsqueeze(-1).repeat(1, 1, caption_embedding.size(-1)), dim = 1) / torch.sum(padding_mask, dim = 1, keepdim = True)
 
         noise = torch.randn((caption_embedding.size(0), self.img_length * self.img_length, caption_embedding.size(-1)), device = caption_embedding.device)

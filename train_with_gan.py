@@ -5,7 +5,7 @@ import copy
 import numpy as np
 import torch.distributed as dist
 from torch.utils.data import DataLoader, DistributedSampler
-from transformers import get_cosine_schedule_with_warmup, CLIPModel
+from transformers import get_cosine_schedule_with_warmup, CLIPModel, AutoTokenizer
 from eval import eval
 from config import Config
 from model import CaptionModel
@@ -81,6 +81,7 @@ def train(config):
         transforms.RandomRotation(degrees = 15),  # 以15度范围内随机旋转
         transforms.ColorJitter(brightness = 0.2, contrast = 0.2),  # 随机调整亮度和对比度
     ])
+    clip_tokenizer = AutoTokenizer.from_pretrained(config.clip_path, do_lower_case = True)
 
     if rank == 0:
         # 读取数据
@@ -106,16 +107,19 @@ def train(config):
         print("读取数据结束")
 
     pre_trained_params = list(map(id, model.module.image_encoder.parameters()))
-    base_params = filter(lambda p: id(p) not in pre_trained_params, model.module.parameters())
+    decoder_params = list(map(id, model.module.decoder_model.parameters()))
+    base_params = filter(lambda p: id(p) not in pre_trained_params and id(p) not in decoder_params, model.module.parameters())
 
     if config.vision_model == 'swin':
         optimizer = torch.optim.AdamW([
             {'params':model.module.image_encoder.parameters(), 'lr':config.lr/10},
+            {'params':model.module.decoder_model.parameters(), 'lr':config.lr/10},
             {'params':base_params, 'lr':config.lr},],
             lr=config.lr, weight_decay=config.weight_decay)
     else:
         optimizer = torch.optim.AdamW([
             {'params':model.module.image_encoder.parameters(), 'lr':0},
+            {'params':model.module.decoder_model.parameters(), 'lr':config.lr/10},
             {'params':base_params, 'lr':config.lr},],
             lr=config.lr, weight_decay=config.weight_decay)
     # optimizer = torch.optim.Adam(model.module.parameters(), lr = config.lr, weight_decay = config.weight_decay)
@@ -197,7 +201,12 @@ def train(config):
             fake_score = discriminator_model(fake_img)
             fake_loss = torch.sum(fake_score) / fake_score.size(0)
             aug_fake_img = data_augmentation(fake_img)
-            clip_score = clip_model(caption_index, aug_fake_img, (caption_index > 0))
+
+            caption_str = config.tokenizer.batch_decode(caption_index.tolist(), skip_special_tokens = True)
+            clip_caption_index = clip_tokenizer.batch_encode_plus(caption_str, max_length = config.max_length, padding = 'max_length', truncation = True)
+            clip_caption_index = torch.tensor(clip_caption_index['input_ids'], device = aug_fake_img.device)
+
+            clip_score = clip_model(clip_caption_index, aug_fake_img, (caption_index > 0))
             clip_score = torch.diag(clip_score.logits_per_image)
             reconstructor_loss = torch.sum(clip_score) / clip_score.size(0)
             gen_loss = - fake_loss - reconstructor_loss
@@ -212,7 +221,7 @@ def train(config):
                 p.requires_grad = True
 
             # 当训练轮次超过一半时, 开始训练图像描述模型
-            if epoch >= config.epoch // 2:
+            if epoch >= config.gan_epoch:
                 model.zero_grad()
                 discriminator_model.zero_grad()
                 generator_model.zero_grad()
@@ -250,7 +259,7 @@ def train(config):
                 scheduler.step()
 
             if rank == 0 and i % 100 == 0:
-                if epoch >= config.epoch // 2:
+                if epoch >= config.gan_epoch:
                     print('i/batch: {}/{} | epoch/epochs: {}/{} | R_loss: {}, D_loss: {}, G_loss: {}, G_D_loss: {}, G_R_loss: {}'.format(i, len(train_data), epoch, config.epoch, re_loss.item(), dis_loss.item(), gen_loss.item(), fake_loss.item(), reconstructor_loss.item()))
                 else:
                     print('i/batch: {}/{} | epoch/epochs: {}/{} | R_loss: {}, D_loss: {}, G_loss: {}, G_D_loss: {}, G_R_loss: {}'.format(i, len(train_data), epoch, config.epoch, 0, dis_loss.item(), gen_loss.item(), fake_loss.item(), reconstructor_loss.item()))

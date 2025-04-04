@@ -73,16 +73,19 @@ def train(config):
         print("读取数据结束")
 
     pre_trained_params = list(map(id, model.module.image_encoder.parameters()))
-    base_params = filter(lambda p: id(p) not in pre_trained_params, model.module.parameters())
+    decoder_params = list(map(id, model.module.decoder_model.parameters()))
+    base_params = filter(lambda p: id(p) not in pre_trained_params and id(p) not in decoder_params, model.module.parameters())
 
     if config.vision_model == 'swin':
         optimizer = torch.optim.AdamW([
             {'params':model.module.image_encoder.parameters(), 'lr':config.lr/10},
+            {'params':model.module.decoder_model.parameters(), 'lr':config.lr/10},
             {'params':base_params, 'lr':config.lr},],
             lr=config.lr, weight_decay=config.weight_decay)
     else:
         optimizer = torch.optim.AdamW([
             {'params':model.module.image_encoder.parameters(), 'lr':0},
+            {'params':model.module.decoder_model.parameters(), 'lr':config.lr/10},
             {'params':base_params, 'lr':config.lr},],
             lr=config.lr, weight_decay=config.weight_decay)
     # optimizer = torch.optim.Adam(model.module.parameters(), lr = config.lr, weight_decay = config.weight_decay)
